@@ -1,59 +1,63 @@
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
+import { clerkMiddleware } from "@clerk/express";
 import connectDb from "./config/connectDb.js";
-import {
-  clerkMiddleware,
-  requireAuth,
-  getAuth,
-  clerkClient,
-} from "@clerk/express";
 
-
-// if protected routes are needed, use requireAuth() middleware as shown below
-// import { requireAuth } from "@clerk/express";
-
-// app.get("/protected", requireAuth(), (req, res) => {
-//   res.json({ message: "Protected success" });
-// });
-
+// Routes
+import userRoutes from "./routes/user.js";
+import opportunityRoutes from "./routes/opportunities.js";
+import savedRoutes from "./routes/saved.js";
+import calendarRoutes from "./routes/calendar.js";
+import syncRoutes from "./routes/sync.js";
+import googleAuthRoutes from "./routes/googleAuth.js";
 
 dotenv.config();
 
 const PORT = process.env.PORT || 8181;
 const app = express();
 
-// middlewares
-app.use(cors());
+// ── Middlewares ──────────────────────────────────────────────────────────────
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    credentials: true,
+  })
+);
 app.use(express.json());
-app.use(clerkMiddleware());
+app.use(clerkMiddleware()); // Attaches auth info to req; use requireClerkAuth in routes
 
-// routes
+// ── Health check ─────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
-  res.send("API running");
+  res.json({ status: "ok", service: "Missed Opportunity Detector API" });
 });
 
-app.get("/protected", (req, res) => {
-  res.json({
-    message: "Backend working ✅",
-  });
+// ── API Routes ───────────────────────────────────────────────────────────────
+app.use("/api/user", userRoutes);
+app.use("/api/opportunities", opportunityRoutes);
+app.use("/api/opportunity", opportunityRoutes); // alias for n8n POST
+app.use("/api/save", savedRoutes);
+app.use("/api/saved", savedRoutes);
+app.use("/api/calendar", calendarRoutes);
+app.use("/api/sync-trigger", syncRoutes);
+app.use("/api/auth", googleAuthRoutes);
+
+// ── 404 handler ──────────────────────────────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).json({ error: "Route not found." });
 });
 
-
-app.get("/debug", (req, res) => {
-  const auth = getAuth(req);
-
-  res.json({
-    message: "Clerk check",
-    auth,
-  });
+// ── Global error handler ─────────────────────────────────────────────────────
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ error: "Internal server error." });
 });
 
-
+// ── Start ─────────────────────────────────────────────────────────────────────
 connectDb()
   .then(() => {
     app.listen(PORT, () => {
-      console.log(`Server started on port ${PORT}`);
+      console.log(`✅ Server started on port ${PORT}`);
     });
   })
   .catch(() => {
