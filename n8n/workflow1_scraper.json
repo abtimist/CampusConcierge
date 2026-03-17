@@ -1,0 +1,248 @@
+{
+    "name": "Workflow 1: Opportunity Scraper (Cloud Friendly)",
+    "nodes": [
+        {
+            "parameters": {
+                "values": {
+                    "string": [
+                        {
+                            "name": "BACKEND_URL",
+                            "value": "https://your-backend.onrender.com",
+                            "description": "The URL of your deployed Render backend"
+                        },
+                        {
+                            "name": "INTERNAL_API_SECRET",
+                            "value": "your_generated_secret_here",
+                            "description": "The secret random string from your backend .env"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "config",
+            "name": "Cloud Config",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.2,
+            "position": [
+                0,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "hours",
+                            "hoursInterval": 6
+                        }
+                    ]
+                }
+            },
+            "id": "cron-trigger",
+            "name": "Every 6 Hours",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.2,
+            "position": [
+                240,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "https://devpost.com/feed",
+                "options": {}
+            },
+            "id": "fetch-devpost",
+            "name": "Fetch Devpost RSS",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                460,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "url": "https://unstop.com/api/public/opportunity/search?type=hackathon&limit=20",
+                "options": {}
+            },
+            "id": "fetch-unstop",
+            "name": "Fetch Unstop Hackathons",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                460,
+                380
+            ]
+        },
+        {
+            "parameters": {
+                "url": "https://internshala.com/rss/internships",
+                "options": {}
+            },
+            "id": "fetch-internshala",
+            "name": "Fetch Internshala RSS",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                460,
+                560
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Normalize and tag all fetched items\nconst config = $('Cloud Config').first().json;\n\nconst tagRules = [\n  { keywords: ['ai', 'machine learning', 'ml', 'llm', 'gpt', 'deep learning'], tag: 'AI' },\n  { keywords: ['web', 'frontend', 'react', 'next', 'vue', 'angular', 'html', 'css'], tag: 'Web Dev' },\n  { keywords: ['blockchain', 'web3', 'crypto', 'solidity', 'nft'], tag: 'Blockchain' },\n  { keywords: ['mobile', 'android', 'ios', 'flutter', 'react native'], tag: 'Mobile' },\n  { keywords: ['cloud', 'aws', 'gcp', 'azure', 'devops', 'kubernetes', 'docker'], tag: 'Cloud' },\n  { keywords: ['data', 'analytics', 'sql', 'pandas', 'spark', 'tableau'], tag: 'Data Science' },\n];\n\nfunction getTags(text) {\n  const lower = text.toLowerCase();\n  const matched = tagRules\n    .filter(r => r.keywords.some(k => lower.includes(k)))\n    .map(r => r.tag);\n  return [...new Set(matched)];\n}\n\n// Collect all inputs\nconst allItems = $input.all();\nconst results = [];\n\nfor (const item of allItems) {\n  const d = item.json;\n  if (d.BACKEND_URL) continue; // skip the config node itself\n\n  const title = d.title || d.name || 'Untitled';\n  const description = d.description || d.summary || d.short_description || '';\n  const link = d.link || d.url || d.apply_url || '#';\n  const rawDeadline = d.deadline || d.end_date || d.application_deadline;\n  const deadline = rawDeadline ? new Date(rawDeadline) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);\n\n  let type = 'hackathon';\n  if (link.includes('intern') || title.toLowerCase().includes('intern')) type = 'internship';\n  else if (link.includes('job') || title.toLowerCase().includes('job')) type = 'job';\n\n  const tags = getTags(`${title} ${description}`);\n\n  if (title && link && link !== '#') {\n    results.push({\n      json: { title, description, link, deadline: deadline.toISOString(), type, tags, source: d.source || 'scraped' }\n    });\n  }\n}\n\nreturn results;\n"
+            },
+            "id": "transform-tag",
+            "name": "Transform & Tag",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                700,
+                380
+            ]
+        },
+        {
+            "parameters": {
+                "url": "={{ $('Cloud Config').first().json.BACKEND_URL }}/api/opportunity",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "x-api-secret",
+                            "value": "={{ $('Cloud Config').first().json.INTERNAL_API_SECRET }}"
+                        },
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "title",
+                            "value": "={{ $json.title }}"
+                        },
+                        {
+                            "name": "description",
+                            "value": "={{ $json.description }}"
+                        },
+                        {
+                            "name": "link",
+                            "value": "={{ $json.link }}"
+                        },
+                        {
+                            "name": "deadline",
+                            "value": "={{ $json.deadline }}"
+                        },
+                        {
+                            "name": "type",
+                            "value": "={{ $json.type }}"
+                        },
+                        {
+                            "name": "tags",
+                            "value": "={{ $json.tags }}"
+                        },
+                        {
+                            "name": "source",
+                            "value": "={{ $json.source }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "post-to-backend",
+            "name": "POST to Backend",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.12,
+            "position": [
+                940,
+                380
+            ]
+        }
+    ],
+    "connections": {
+        "Cloud Config": {
+            "main": [
+                [
+                    {
+                        "node": "Fetch Devpost RSS",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Fetch Unstop Hackathons",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Fetch Internshala RSS",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "cron-trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Cloud Config",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Fetch Devpost RSS": {
+            "main": [
+                [
+                    {
+                        "node": "Transform & Tag",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Fetch Unstop Hackathons": {
+            "main": [
+                [
+                    {
+                        "node": "Transform & Tag",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Fetch Internshala RSS": {
+            "main": [
+                [
+                    {
+                        "node": "Transform & Tag",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Transform & Tag": {
+            "main": [
+                [
+                    {
+                        "node": "post-to-backend",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1"
+    }
+}

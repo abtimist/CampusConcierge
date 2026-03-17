@@ -1,0 +1,230 @@
+{
+    "name": "Workflow 2: Daily Alert System (Cloud Friendly)",
+    "nodes": [
+        {
+            "parameters": {
+                "values": {
+                    "string": [
+                        {
+                            "name": "BACKEND_URL",
+                            "value": "https://your-backend.onrender.com"
+                        },
+                        {
+                            "name": "INTERNAL_API_SECRET",
+                            "value": "your_generated_secret_here"
+                        },
+                        {
+                            "name": "SMTP_FROM_EMAIL",
+                            "value": "your-email@gmail.com"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "config",
+            "name": "Cloud Config",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.2,
+            "position": [
+                0,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "cronExpression",
+                            "expression": "0 9 * * *"
+                        }
+                    ]
+                }
+            },
+            "id": "daily-cron",
+            "name": "Daily at 9AM",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.2,
+            "position": [
+                150,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "={{ $('Cloud Config').first().json.BACKEND_URL }}/api/user/all",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "x-api-secret",
+                            "value": "={{ $('Cloud Config').first().json.INTERNAL_API_SECRET }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "fetch-users",
+            "name": "Fetch All Users",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.12,
+            "position": [
+                400,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "url": "={{ $('Cloud Config').first().json.BACKEND_URL }}/api/opportunities",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "x-api-secret",
+                            "value": "={{ $('Cloud Config').first().json.INTERNAL_API_SECRET }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "fetch-opps",
+            "name": "Fetch All Opportunities",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.12,
+            "position": [
+                400,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const users = $('Fetch All Users').first().json.users || [];\nconst opps = $('Fetch All Opportunities').first().json.opportunities || [];\nconst now = new Date();\nconst results = [];\n\nfor (const user of users) {\n  if (!user.telegramChatId && !user.email) continue;\n\n  const matched = opps.filter(opp => {\n    const deadline = new Date(opp.deadline);\n    const daysLeft = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));\n    if (daysLeft < 0 || daysLeft > 3) return false;\n    if (user.interests?.length > 0 && !opp.tags?.some(t => user.interests.includes(t))) return false;\n    return true;\n  });\n\n  for (const opp of matched) {\n    const deadline = new Date(opp.deadline);\n    const daysLeft = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));\n    const deadlineStr = deadline.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });\n\n    results.push({\n      json: {\n        telegramChatId: user.telegramChatId,\n        email: user.email,\n        title: opp.title,\n        link: opp.link,\n        deadline: deadlineStr,\n        daysLeft,\n        message: `🚀 *Opportunity: ${opp.title}*\\n⏰ Deadline: ${deadlineStr} (${daysLeft} days left)\\n🔗 Apply: ${opp.link}`\n      }\n    });\n  }\n}\nreturn results;"
+            },
+            "id": "match-users",
+            "name": "Match Users",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                650,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "chatId": "={{ $json.telegramChatId }}",
+                "text": "={{ $json.message }}",
+                "additionalFields": {
+                    "parse_mode": "Markdown"
+                }
+            },
+            "id": "send-telegram",
+            "name": "Send Telegram",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1.2,
+            "position": [
+                850,
+                200
+            ],
+            "credentials": {
+                "telegramApi": {
+                    "id": "telegram-bot-creds",
+                    "name": "Telegram Bot"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "fromEmail": "={{ $('Cloud Config').first().json.SMTP_FROM_EMAIL }}",
+                "toEmail": "={{ $json.email }}",
+                "subject": "🚀 Alert: {{ $json.title }}",
+                "emailFormat": "html",
+                "html": "<h3>🚀 {{ $json.title }}</h3><p>Deadline: {{ $json.deadline }} ({{ $json.daysLeft }} days left)</p><a href=\"{{ $json.link }}\">Apply Now</a>",
+                "options": {}
+            },
+            "id": "send-email",
+            "name": "Send Email",
+            "type": "n8n-nodes-base.emailSend",
+            "typeVersion": 2.1,
+            "position": [
+                850,
+                400
+            ],
+            "credentials": {
+                "smtp": {
+                    "id": "smtp-creds",
+                    "name": "SMTP"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Daily at 9AM": {
+            "main": [
+                [
+                    {
+                        "node": "Cloud Config",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Cloud Config": {
+            "main": [
+                [
+                    {
+                        "node": "Fetch All Users",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Fetch All Opportunities",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Fetch All Users": {
+            "main": [
+                [
+                    {
+                        "node": "Match Users",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Fetch All Opportunities": {
+            "main": [
+                [
+                    {
+                        "node": "Match Users",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Match Users": {
+            "main": [
+                [
+                    {
+                        "node": "Send Telegram",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Send Email",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1"
+    }
+}

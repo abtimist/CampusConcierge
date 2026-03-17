@@ -1,0 +1,249 @@
+{
+    "name": "Workflow 3: Telegram Bot Commands (Cloud Friendly)",
+    "nodes": [
+        {
+            "parameters": {
+                "values": {
+                    "string": [
+                        {
+                            "name": "BACKEND_URL",
+                            "value": "https://your-backend.onrender.com"
+                        },
+                        {
+                            "name": "INTERNAL_API_SECRET",
+                            "value": "your_generated_secret_here"
+                        }
+                    ]
+                }
+            },
+            "id": "config",
+            "name": "Cloud Config",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.2,
+            "position": [
+                0,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "updates": [
+                    "message"
+                ]
+            },
+            "id": "telegram-trigger",
+            "name": "Telegram Trigger",
+            "type": "n8n-nodes-base.telegramTrigger",
+            "typeVersion": 1.1,
+            "position": [
+                200,
+                300
+            ],
+            "credentials": {
+                "telegramApi": {
+                    "id": "telegram-bot-creds",
+                    "name": "Telegram Bot"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const msg = $input.first().json.message;\nconst text = msg?.text || '';\nconst chatId = String(msg?.chat?.id || '');\nconst match = text.match(/^\\/add_to_calendar\\s+(\\w+)/);\nif (!match) return [{ json: { chatId, command: 'unknown', reply: '❓ Try: /add_to_calendar <opportunityId>' } }];\nreturn [{ json: { chatId, command: 'add_to_calendar', opportunityId: match[1] } }];"
+            },
+            "id": "parse-command",
+            "name": "Parse Command",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                400,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "={{ $('Cloud Config').first().json.BACKEND_URL }}/api/user/all",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "x-api-secret",
+                            "value": "={{ $('Cloud Config').first().json.INTERNAL_API_SECRET }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "find-user",
+            "name": "Find User",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.12,
+            "position": [
+                600,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "url": "={{ $('Cloud Config').first().json.BACKEND_URL }}/api/opportunity/={{ $('Parse Command').first().json.opportunityId }}",
+                "options": {}
+            },
+            "id": "fetch-opp",
+            "name": "Fetch Opportunity",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.12,
+            "position": [
+                600,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const chatId = $('Parse Command').first().json.chatId;\nconst users = $('Find User').first().json.users || [];\nconst user = users.find(u => String(u.telegramChatId) === chatId);\nif (!user) return [{ json: { found: false, chatId } }];\nconst opp = $('Fetch Opportunity').first().json.opportunity;\nreturn [{ json: { found: true, chatId, title: opp.title, deadline: opp.deadline, link: opp.link } }];"
+            },
+            "id": "logic",
+            "name": "Match Logic",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                800,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "calendar": {
+                    "mode": "id",
+                    "value": "primary"
+                },
+                "start": "={{ $json.deadline }}",
+                "end": "={{ $json.deadline }}",
+                "additionalFields": {
+                    "summary": "={{ $json.title }}",
+                    "description": "Apply: {{ $json.link }}",
+                    "allday": true
+                }
+            },
+            "id": "create-event",
+            "name": "Create Event",
+            "type": "n8n-nodes-base.googleCalendar",
+            "typeVersion": 1.3,
+            "position": [
+                1000,
+                200
+            ],
+            "credentials": {
+                "googleCalendarOAuth2Api": {
+                    "id": "gcal-creds",
+                    "name": "Google Calendar"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "chatId": "={{ $json.chatId }}",
+                "text": "✅ *Added to Google Calendar!*\\n{{ $json.title }}",
+                "additionalFields": {
+                    "parse_mode": "Markdown"
+                }
+            },
+            "id": "confirm",
+            "name": "Confirm",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1.2,
+            "position": [
+                1200,
+                200
+            ],
+            "credentials": {
+                "telegramApi": {
+                    "id": "telegram-bot-creds",
+                    "name": "Telegram Bot"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "telegram-trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Cloud Config",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Cloud Config": {
+            "main": [
+                [
+                    {
+                        "node": "Parse Command",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parse Command": {
+            "main": [
+                [
+                    {
+                        "node": "Find User",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Fetch Opportunity",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Find User": {
+            "main": [
+                [
+                    {
+                        "node": "Match Logic",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Fetch Opportunity": {
+            "main": [
+                [
+                    {
+                        "node": "Match Logic",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Match Logic": {
+            "main": [
+                [
+                    {
+                        "node": "create-event",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "create-event": {
+            "main": [
+                [
+                    {
+                        "node": "confirm",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}
